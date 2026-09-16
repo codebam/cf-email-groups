@@ -77,7 +77,7 @@ export async function createCampaign(
 }
 
 export async function updateCampaign(db: D1Database, campaign: CampaignRow, input: CampaignInput): Promise<CampaignRow> {
-  if (campaign.status === 'sending') throw new HttpError(409, 'This campaign is currently sending.');
+  if (campaign.status === 'sending') throw new HttpError(409, 'This campaign is still marked as sending. Go back to the campaign list and choose Resume, or wait for the current batch to finish.');
   const { subject, bodyMd } = validateCampaignInput(input);
   await execute(
     db,
@@ -163,6 +163,43 @@ export interface SendCampaignOptions {
   appUrl: string;
 }
 
+/** Atomically moves a draft/failed campaign to sending and resets its counters. */
+async function claimCampaignForSend(
+  db: D1Database,
+  groupId: string,
+  campaign: CampaignRow,
+): Promise<{ campaign: CampaignRow; claimed: boolean; total: number }> {
+  const total = await activeCount(db, groupId, null);
+  const now = new Date().toISOString();
+  const claim = await db
+    .prepare(
+      `UPDATE campaigns SET status = 'sending', total = ?, sent_count = 0, failed_count = 0,
+         cursor = NULL, started_at = ?, updated_at = ?, sent_at = NULL
+       WHERE id = ? AND status IN ('draft', 'failed')`,
+    )
+    .bind(total, now, now, campaign.id)
+    .run();
+  if ((claim.meta?.changes ?? 0) === 0) {
+    const latest = await getCampaign(db, campaign.id);
+    if (!latest) throw new HttpError(404, 'Campaign not found.');
+    return { campaign: latest, claimed: false, total: latest.total };
+  }
+  return {
+    campaign: { ...campaign, status: 'sending', total, sent_count: 0, failed_count: 0, cursor: null, started_at: now, sent_at: null },
+    claimed: true,
+    total,
+  };
+}
+
+function batchStatus(done: boolean, allFailed: boolean, anySent: boolean, current: CampaignStatus): CampaignStatus {
+  if (done) return 'sent';
+  // A batch where every recipient failed and no cursor advanced would otherwise
+  // leave the campaign stuck in 'sending' forever. Mark it failed so the admin UI
+  // can show the error and offer a retry/edit.
+  if (allFailed && !anySent) return 'failed';
+  return current === 'draft' ? 'sending' : current;
+}
+
 /**
  * Sends one batch and returns progress. Call repeatedly until `done` is true.
  * Batches keep each Worker invocation inside subrequest/CPU limits.
@@ -177,28 +214,13 @@ export async function sendCampaignBatch(
   let campaign = campaignInput;
   const batchSize = Math.min(100, Math.max(1, options.batchSize));
 
-  if (campaign.status === 'draft') {
-    const total = await activeCount(db, group.id, null);
-    const now = new Date().toISOString();
-    // Atomic claim: only one concurrent sender may move draft -> sending.
-    const claim = await db
-      .prepare(
-        `UPDATE campaigns SET status = 'sending', total = ?, sent_count = 0, failed_count = 0,
-           cursor = NULL, started_at = ?, updated_at = ?, sent_at = NULL
-         WHERE id = ? AND status = 'draft'`,
-      )
-      .bind(total, now, now, campaign.id)
-      .run();
-    if ((claim.meta?.changes ?? 0) === 0) {
-      const latest = await getCampaign(db, campaign.id);
-      if (!latest) throw new HttpError(404, 'Campaign not found.');
-      campaign = latest;
-    } else {
-      campaign = { ...campaign, status: 'sending', total, sent_count: 0, failed_count: 0, cursor: null, started_at: now, sent_at: null };
-      if (total === 0) {
-        await execute(db, "UPDATE campaigns SET status = 'sent', sent_at = ?, updated_at = ? WHERE id = ?", now, now, campaign.id);
-        return { status: 'sent', total: 0, sent: 0, failed: 0, remaining: 0, done: true };
-      }
+  if (campaign.status === 'draft' || (campaign.status === 'failed' && !options.retryFailed)) {
+    const started = await claimCampaignForSend(db, group.id, campaign);
+    campaign = started.campaign;
+    if (started.claimed && started.total === 0) {
+      const now = new Date().toISOString();
+      await execute(db, "UPDATE campaigns SET status = 'sent', sent_at = ?, updated_at = ? WHERE id = ?", now, now, campaign.id);
+      return { status: 'sent', total: 0, sent: 0, failed: 0, remaining: 0, done: true };
     }
   }
 
@@ -208,7 +230,7 @@ export async function sendCampaignBatch(
   }
 
   let recipients: SubscriberRow[];
-  if (options.retryFailed && (campaign.status === 'sent' || campaign.status === 'sending')) {
+  if (options.retryFailed && (campaign.status === 'sent' || campaign.status === 'sending' || campaign.status === 'failed')) {
     recipients = await queryAll<SubscriberRow>(
       db,
       `SELECT s.* FROM campaign_sends cs JOIN subscribers s ON s.id = cs.subscriber_id
@@ -314,7 +336,7 @@ export async function sendCampaignBatch(
   const done = remaining === 0;
   const allFailed = results.length > 0 && results.every((result) => result.status === 'failed');
   const failed = counts.failed;
-  const status: CampaignStatus = done ? 'sent' : campaign.status === 'draft' ? 'sending' : campaign.status;
+  const status = batchStatus(done, allFailed, anySent, campaign.status);
 
   // Compare-and-swap on cursor: if another batch advanced it concurrently, report
   // the newer state instead of overwriting it (which could double-send).

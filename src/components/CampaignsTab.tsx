@@ -3,6 +3,7 @@ import { markdownToText, renderMarkdown } from '../lib/markdown';
 import { personalize, SAMPLE_SUBSCRIBER } from '../lib/personalize';
 import type { Campaign, GroupDetail, SessionUser } from '../lib/types';
 import { api } from './api';
+import { CampaignConfirmDialog, CampaignProgressDialog } from './CampaignDialogs';
 import { ConfirmDialog, EmptyState, Field, formatDateTime, Modal, type PushToast, Spinner, StatusBadge, useToasts } from './ui';
 
 interface Props {
@@ -71,6 +72,7 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
       notify('error', 'Add a subject line before saving.');
       return null;
     }
+    const creating = editingId === null;
     setSaving(true);
     try {
       const result = editingId
@@ -84,6 +86,7 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
           });
       upsert(result.campaign);
       setEditingId(result.campaign.id);
+      notify('success', creating ? 'Campaign created.' : 'Draft saved.');
       return result.campaign;
     } catch (error) {
       notify('error', error instanceof Error ? error.message : 'Could not save the campaign.');
@@ -166,6 +169,28 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
       notify('error', error instanceof Error ? error.message : 'Could not delete the campaign.');
     }
   };
+
+  const confirmSendDialog = confirmSend ? (
+    <CampaignConfirmDialog
+      campaign={confirmSend}
+      activeCount={group.counts.active}
+      onCancel={() => setConfirmSend(null)}
+      onConfirm={() => void startSend(confirmSend, false)}
+    />
+  ) : null;
+
+  const sendingDialog = sending ? (
+    <CampaignProgressDialog
+      sending={sending}
+      sendError={sendError}
+      activeCampaign={activeCampaign}
+      onRetry={(retry) => {
+        setSendError(null);
+        if (activeCampaign) void startSend(activeCampaign, retry);
+      }}
+      onClose={() => setSending(null)}
+    />
+  ) : null;
 
   if (editorOpen) {
     return (
@@ -267,6 +292,8 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
             </form>
           </Modal>
         ) : null}
+        {confirmSendDialog}
+        {sendingDialog}
         {host}
       </div>
     );
@@ -308,20 +335,27 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
                     ? `Sent ${formatDateTime(campaign.sentAt)} · ${campaign.sentCount}/${campaign.total} delivered`
                     : campaign.status === 'sending'
                       ? `Sending… ${campaign.sentCount}/${campaign.total}`
-                      : `Draft · created ${formatDateTime(campaign.createdAt)}`}
+                      : campaign.status === 'failed'
+                        ? `Failed · ${campaign.sentCount}/${campaign.total} delivered`
+                        : `Draft · created ${formatDateTime(campaign.createdAt)}`}
                   {campaign.failedCount > 0 ? ` · ${campaign.failedCount} failed` : ''}
                 </div>
               </div>
               <div class="row-tight">
-                {campaign.status === 'draft' ? (
+                {campaign.status === 'draft' || campaign.status === 'failed' ? (
                   <>
                     <button type="button" class="btn btn-secondary btn-sm" onClick={() => openEdit(campaign)}>
                       Edit
                     </button>
                     <button type="button" class="btn btn-sm" disabled={group.counts.active === 0} onClick={() => setConfirmSend(campaign)}>
-                      Send
+                      {campaign.status === 'failed' ? 'Send again' : 'Send'}
                     </button>
                   </>
+                ) : null}
+                {campaign.status === 'sending' ? (
+                  <button type="button" class="btn btn-sm" onClick={() => void startSend(campaign, false)}>
+                    Resume
+                  </button>
                 ) : null}
                 {campaign.status === 'sent' && campaign.failedCount > 0 ? (
                   <button type="button" class="btn btn-secondary btn-sm" onClick={() => void startSend(campaign, true)}>
@@ -350,66 +384,9 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
         </div>
       )}
 
-      {confirmSend ? (
-        <ConfirmDialog
-          title="Send campaign"
-          confirmLabel={`Send to ${group.counts.active}`}
-          onCancel={() => setConfirmSend(null)}
-          onConfirm={() => void startSend(confirmSend, false)}
-        >
-          <p>
-            Send <strong>{confirmSend.subject}</strong> to {group.counts.active} active subscribers?
-          </p>
-          <p class="muted small">Emails are delivered in batches. You can watch progress and it's safe to close this page.</p>
-        </ConfirmDialog>
-      ) : null}
+      {confirmSendDialog}
 
-      {sending ? (
-        <Modal
-          title={sending.done ? 'Campaign sent' : 'Sending campaign'}
-          onClose={() => !sending.done && !sendError ? undefined : setSending(null)}
-          footer={
-            sending.done || sendError ? (
-              <>
-                {sending.failed > 0 && sending.done && activeCampaign ? (
-                  <button type="button" class="btn btn-secondary" onClick={() => void startSend(activeCampaign, true)}>
-                    Retry failed
-                  </button>
-                ) : null}
-                {sendError && activeCampaign ? (
-                  <button
-                    type="button"
-                    class="btn"
-                    onClick={() => {
-                      const retry = sending.retry;
-                      setSendError(null);
-                      void startSend(activeCampaign, retry);
-                    }}
-                  >
-                    Retry
-                  </button>
-                ) : null}
-                <button type="button" class="btn" onClick={() => setSending(null)}>
-                  Close
-                </button>
-              </>
-            ) : null
-          }
-        >
-          <div class="stack">
-            {sendError ? <div class="alert alert-error">{sendError}</div> : null}
-            <div class="progress">
-              <span style={`width:${sending.total ? Math.round(((sending.sent + sending.failed) / sending.total) * 100) : 0}%`} />
-            </div>
-            <div class="row small muted">
-              <span>{sending.sent} delivered</span>
-              {sending.failed ? <span>{sending.failed} failed</span> : null}
-              <span class="right">{sending.total} total</span>
-            </div>
-            {sending.done ? <div class="alert alert-success">All done.</div> : <p class="muted small">Keep this tab open while it sends.</p>}
-          </div>
-        </Modal>
-      ) : null}
+      {sendingDialog}
 
       {deleting ? (
         <ConfirmDialog title="Delete campaign" confirmLabel="Delete" onCancel={() => setDeleting(null)} onConfirm={() => void deleteCampaign()}>

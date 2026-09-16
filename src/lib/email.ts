@@ -35,6 +35,27 @@ export interface EmailProvider {
   sendBatch(messages: ProviderMessage[]): Promise<Array<{ id?: string; error?: string }>>;
 }
 
+/** Sends messages one at a time, recording per-message errors instead of throwing. */
+async function sendIndividually(
+  send: (message: ProviderMessage) => Promise<{ id?: string }>,
+  messages: ProviderMessage[],
+): Promise<Array<{ id?: string; error?: string }>> {
+  const results: Array<{ id?: string; error?: string }> = [];
+  for (const message of messages) {
+    try {
+      results.push(await send(message));
+    } catch (error) {
+      const code =
+        error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+          ? `${(error as { code: string }).code}: `
+          : '';
+      const detail = error instanceof Error ? error.message : 'Email delivery failed';
+      results.push({ error: `${code}${detail}` });
+    }
+  }
+  return results;
+}
+
 /** Strips CR/LF and control characters so values can't inject email headers. */
 export const cleanHeader = cleanInline;
 
@@ -66,8 +87,29 @@ function logProvider(): EmailProvider {
   return {
     name: 'log',
     send,
-    sendBatch: async (messages) => Promise.all(messages.map(send)),
+    sendBatch: (messages) => sendIndividually(send, messages),
   };
+}
+
+async function sendResendFallback(
+  sendOne: (message: ProviderMessage) => Promise<{ id?: string }>,
+  chunk: ProviderMessage[],
+  batchError: string,
+): Promise<Array<{ id?: string; error?: string }>> {
+  // Batch API access can be more restricted than the single-send endpoint (for
+  // example before a sending domain is fully onboarded). Fall back to one request
+  // per message, the same endpoint a successful test send uses.
+  console.warn(`[cf-email-groups] Resend batch failed (${batchError}); retrying ${chunk.length} message(s) individually.`);
+  const fallback: Array<{ id?: string; error?: string }> = await Promise.all(
+    chunk.map(async (message) => {
+      try {
+        return await sendOne(message);
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : batchError };
+      }
+    }),
+  );
+  return fallback;
 }
 
 function resendProvider(env: AppBindings): EmailProvider {
@@ -117,12 +159,14 @@ function resendProvider(env: AppBindings): EmailProvider {
     return data;
   };
 
+  const sendOne = async (message: ProviderMessage): Promise<{ id?: string }> => {
+    const data = await post(endpoint, payloadFor(message));
+    return { id: typeof data.id === 'string' ? data.id : undefined };
+  };
+
   return {
     name: 'resend',
-    async send(message) {
-      const data = await post(endpoint, payloadFor(message));
-      return { id: typeof data.id === 'string' ? data.id : undefined };
-    },
+    send: sendOne,
     async sendBatch(messages) {
       const results: Array<{ id?: string; error?: string }> = [];
       for (let i = 0; i < messages.length; i += 100) {
@@ -138,8 +182,8 @@ function resendProvider(env: AppBindings): EmailProvider {
             results.push(ids.length > 0 && entry && typeof entry.id === 'string' ? { id: entry.id } : {});
           });
         } catch (error) {
-          const message = error instanceof Error ? error.message : 'Resend batch failed';
-          chunk.forEach(() => results.push({ error: message }));
+          const batchError = error instanceof Error ? error.message : 'Resend batch failed';
+          results.push(...(await sendResendFallback(sendOne, chunk, batchError)));
         }
       }
       return results;
@@ -156,6 +200,13 @@ function headerObject(message: ProviderMessage): Record<string, string> | undefi
   };
 }
 
+/** Cloudflare Email Service throws errors with a `code` such as E_HEADER_NOT_ALLOWED. */
+function isHeaderError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && code.startsWith('E_HEADER');
+}
+
 function addressObject(value: string): string | { email: string; name?: string } {
   const parsed = parseAddress(value);
   if (!parsed) return value;
@@ -168,33 +219,44 @@ function addressObject(value: string): string | { email: string; name?: string }
  * domain. Cloudflare currently recommends it for transactional mail only, so
  * use Resend for large newsletter/marketing sends.
  */
+async function sendCloudflareOnce(
+  binding: SendEmailBinding,
+  message: ProviderMessage,
+  headers: Record<string, string> | undefined,
+): Promise<{ id?: string }> {
+  const result = await binding.send({
+    to: message.to,
+    from: addressObject(message.from),
+    subject: message.subject,
+    html: message.html,
+    text: message.text,
+    ...(message.replyTo ? { replyTo: addressObject(message.replyTo) } : {}),
+    ...(headers ? { headers } : {}),
+  });
+  return { id: result?.messageId ? `cf_${result.messageId}` : undefined };
+}
+
+async function sendCloudflareMessage(binding: SendEmailBinding, message: ProviderMessage): Promise<{ id?: string }> {
+  const headers = headerObject(message);
+  try {
+    return await sendCloudflareOnce(binding, message, headers);
+  } catch (error) {
+    // Accounts that have not onboarded a sending domain (using verified
+    // destination addresses) can still send transactional mail, but the
+    // header allowlist may reject the bulk List-Unsubscribe pair. Retry
+    // without custom headers so the campaign is delivered.
+    if (!headers || !isHeaderError(error)) throw error;
+    console.warn('[cf-email-groups] Cloudflare Email Service rejected custom headers; retrying without List-Unsubscribe.', error);
+    return sendCloudflareOnce(binding, message, undefined);
+  }
+}
+
 function cloudflareProvider(binding: SendEmailBinding): EmailProvider {
-  const send = async (message: ProviderMessage) => {
-    const result = await binding.send({
-      to: message.to,
-      from: addressObject(message.from),
-      subject: message.subject,
-      html: message.html,
-      text: message.text,
-      ...(message.replyTo ? { replyTo: addressObject(message.replyTo) } : {}),
-      ...(headerObject(message) ? { headers: headerObject(message) } : {}),
-    });
-    return { id: result?.messageId ? `cf_${result.messageId}` : undefined };
-  };
+  const send = (message: ProviderMessage) => sendCloudflareMessage(binding, message);
   return {
     name: 'cloudflare',
     send,
-    async sendBatch(messages) {
-      const results: Array<{ id?: string; error?: string }> = [];
-      for (const message of messages) {
-        try {
-          results.push(await send(message));
-        } catch (error) {
-          results.push({ error: error instanceof Error ? error.message : 'Cloudflare Email Service send failed' });
-        }
-      }
-      return results;
-    },
+    sendBatch: (messages) => sendIndividually(send, messages),
   };
 }
 
