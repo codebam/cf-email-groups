@@ -1,0 +1,60 @@
+---
+import Base from '../layouts/Base.astro';
+import { devAuthEnabled, getEnv } from '../lib/config';
+import { singleListConfig } from '../lib/single';
+
+const user = Astro.locals.user;
+if (user) return Astro.redirect('/app');
+
+const env = getEnv();
+const single = singleListConfig(env);
+const showDevLogin = devAuthEnabled(env);
+const rawError = Astro.url.searchParams.get('error');
+const errorMessages: Record<string, string> = {
+  github_not_configured:
+    'GitHub sign-in is not configured on this deployment yet. Add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.',
+  oauth_state: 'That sign-in attempt expired or was tampered with. Please try again.',
+  oauth_failed: 'GitHub sign-in failed. Please try again.',
+  not_allowed: 'This GitHub account is not on the sign-in allow-list for this deployment.',
+};
+// Astro's URLSearchParams already percent-decodes this for us.
+const error = rawError ? (errorMessages[rawError] ?? rawError) : null;
+const redirect = Astro.url.searchParams.get('redirect') || '/app';
+---
+
+<Base title="Sign in · CF-Email-Groups" narrow>
+  <div class="container-narrow auth-card">
+    <div class="card">
+      <div class="card-body">
+        <h1 style="font-size:1.5rem">{single ? `Sign in to manage ${single.name}` : 'Sign in'}</h1>
+        <p class="muted small">
+          Use GitHub to authenticate. We store your GitHub id, username, name, avatar, and primary email — nothing
+          else, and never your password.
+        </p>
+
+        {error ? <div class="alert alert-error">{error}</div> : null}
+
+        <a class="btn btn-block" href={`/api/auth/github?redirect=${encodeURIComponent(redirect)}`}>
+          Continue with GitHub
+        </a>
+
+        {showDevLogin ? (
+          <div style="margin-top:1.5rem">
+            <div class="divider"></div>
+            <p class="muted small">
+              <strong>Local development:</strong> DEV_AUTH is on. Sign in as any name without GitHub.
+            </p>
+            <form class="row" method="get" action="/api/auth/dev">
+              <input type="hidden" name="redirect" value={redirect} />
+              <input class="input grow" name="login" placeholder="your-github-username" pattern="[A-Za-z0-9-]{1,39}" required />
+              <button class="btn btn-secondary" type="submit">Dev sign in</button>
+            </form>
+          </div>
+        ) : null}
+      </div>
+    </div>
+    <p class="center small">
+      <a href="/">← Back home</a>
+    </p>
+  </div>
+</Base>

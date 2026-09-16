@@ -1,0 +1,37 @@
+---
+import Base from '../layouts/Base.astro';
+import { getEnv } from '../lib/config';
+import { unsubscribeByToken } from '../lib/subscribers';
+
+const token = Astro.url.searchParams.get('token') ?? '';
+const env = getEnv();
+const result = token ? await unsubscribeByToken(env.DB, token) : { ok: false as const };
+---
+
+<Base title="Unsubscribe · CF-Email-Groups" narrow>
+  <div class="container-narrow" style="margin:4rem auto">
+    <div class="card card-body center">
+      {result.ok ? (
+        <>
+          <div style="font-size:2.2rem" aria-hidden="true">👋</div>
+          <h1 style="font-size:1.5rem">{result.already ? 'Already unsubscribed' : 'You are unsubscribed'}</h1>
+          <p class="muted">
+            {result.groupName ? <><strong>{result.groupName}</strong> won't email you again.</> : "You won't receive any more emails from this list."}
+          </p>
+          {result.groupSlug ? (
+            <p>
+              Changed your mind? <a href={`/join/${result.groupSlug}`}>Subscribe again</a>.
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <div style="font-size:2.2rem" aria-hidden="true">🤔</div>
+          <h1 style="font-size:1.5rem">This unsubscribe link isn't valid</h1>
+          <p class="muted">It may have been shortened or copied incorrectly. Check the footer of a recent email.</p>
+          <a class="btn btn-secondary" href="/">Back home</a>
+        </>
+      )}
+    </div>
+  </div>
+</Base>

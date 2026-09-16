@@ -1,0 +1,21 @@
+---
+import SignupForm from './SignupForm';
+import type { PublicGroup } from '../lib/types';
+
+interface Props {
+  group: PublicGroup | null;
+}
+
+const { group } = Astro.props;
+---
+
+{group ? (
+  <SignupForm slug={group.slug} group={group} siteKey={group.turnstileSiteKey} client:load />
+) : (
+  <div class="card card-body center">
+    <div style="font-size:2rem" aria-hidden="true">🔒</div>
+    <h2>Sign-ups are closed</h2>
+    <p class="muted">This list isn't accepting new subscribers right now.</p>
+    <a class="btn btn-secondary" href="/">Back home</a>
+  </div>
+)}

@@ -1,0 +1,25 @@
+---
+import Base from '../../layouts/Base.astro';
+import Dashboard from '../../components/Dashboard';
+import { getEnv } from '../../lib/config';
+import { ensureSingleListMembership, listGroupsForUser } from '../../lib/groups';
+import { singleListConfig } from '../../lib/single';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect(`/login?redirect=${encodeURIComponent('/app')}`);
+
+const env = getEnv();
+const single = singleListConfig(env);
+
+// Dedicated deployments skip the dashboard entirely.
+if (single) {
+  const membership = await ensureSingleListMembership(env.DB, env, user);
+  if (membership) return Astro.redirect(`/app/groups/${membership.group.slug}`);
+}
+
+const groups = await listGroupsForUser(env.DB, user.id);
+---
+
+<Base title="Dashboard · CF-Email-Groups">
+  <Dashboard user={user} groups={groups} client:load />
+</Base>

@@ -1,0 +1,41 @@
+---
+import Base from '../../../layouts/Base.astro';
+import GroupApp from '../../../components/GroupApp';
+import { appOrigin, getEnv } from '../../../lib/config';
+import { countsByStatus, getGroupForUser, groupRowToDetail, listAdmins } from '../../../lib/groups';
+import { listSubscribers } from '../../../lib/subscribers';
+import { listCampaigns } from '../../../lib/campaigns';
+import { singleListConfig } from '../../../lib/single';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect(`/login?redirect=${encodeURIComponent(Astro.url.pathname)}`);
+}
+
+const env = getEnv();
+const found = await getGroupForUser(env.DB, Astro.params.id!, user.id);
+if (!found) return Astro.redirect('/app');
+
+const counts = await countsByStatus(env.DB, found.group.id);
+const group = groupRowToDetail(found.group, found.role, counts);
+const pageSize = 25;
+const subscribers = await listSubscribers(env.DB, group.id, { status: 'all', page: 1, pageSize });
+const campaigns = await listCampaigns(env.DB, group.id, 50);
+const admins = await listAdmins(env.DB, group.id);
+const publicUrl = `${appOrigin(Astro.request, env)}/join/${group.slug}`;
+---
+
+<Base title={`${group.name} · CF-Email-Groups`}>
+  <GroupApp
+    user={user}
+    group={group}
+    initialSubscribers={subscribers.subscribers}
+    initialTotal={subscribers.total}
+    initialPageSize={pageSize}
+    initialCampaigns={campaigns}
+    initialAdmins={admins}
+    publicUrl={publicUrl}
+    singleList={Boolean(singleListConfig(env))}
+    client:load
+  />
+</Base>

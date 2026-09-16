@@ -1,0 +1,55 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "cf-email-groups",
+	"main": "@astrojs/cloudflare/entrypoints/server",
+	"compatibility_date": "2026-09-01",
+	"observability": {
+		"enabled": true
+	},
+	// Dedicated single-list deployment served only on the custom domain.
+	// Remove/comment `routes` + set workers_dev=true if you need a workers.dev
+	// URL for first-time testing.
+	"workers_dev": false,
+	"preview_urls": false,
+	"routes": [
+		{
+			"pattern": "lists.seanbehan.ca",
+			"custom_domain": true
+		}
+	],
+	// Native Cloudflare Email Service. Locally, wrangler simulates delivery and
+	// logs the rendered email. In production, sending to arbitrary recipients
+	// requires the Workers Paid plan and an onboarded sending domain — see README.
+	// Add `"remote": true` here to send real mail from local dev (careful!).
+	"send_email": [
+		{
+			"name": "EMAIL"
+		}
+	],
+	// Create the database with: pnpm wrangler d1 create cf-email-groups
+	// then paste the `database_id` below (local dev works with the placeholder).
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "cf-email-groups",
+			"database_id": "ecf5a3fd-512c-4a69-88d1-3e39725e1e9a",
+			"migrations_dir": "migrations"
+		}
+	],
+	// Non-secret configuration. Secrets go through `wrangler secret put ...`
+	// (local secrets live in `.dev.vars`).
+	"vars": {
+		"ENVIRONMENT": "production",
+		"APP_URL": "https://lists.seanbehan.ca",
+		"ENFORCE_CANONICAL_HOST": "1",
+		// Single-list mode: one dedicated list, bootstrapped automatically.
+		"SINGLE_LIST": "1",
+		"SINGLE_LIST_SLUG": "seanbehan",
+		"SINGLE_LIST_NAME": "Sean Behan",
+		"SINGLE_LIST_DESCRIPTION": "Occasional updates from Sean. No spam, unsubscribe any time.",
+		// Only this GitHub account can sign in; it becomes the list owner.
+		"ALLOWED_GITHUB_LOGINS": "codebam",
+		// Must be on a domain verified by Resend or onboarded to Cloudflare Email Service.
+		"EMAIL_FROM": "Sean Behan <lists@seanbehan.ca>"
+	}
+}

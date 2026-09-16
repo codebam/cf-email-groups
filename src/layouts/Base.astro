@@ -1,0 +1,51 @@
+---
+import '../styles/global.css';
+import UserMenu from '../components/UserMenu';
+
+interface Props {
+  title?: string;
+  description?: string;
+  narrow?: boolean;
+}
+
+const {
+  title = 'CF-Email-Groups',
+  description = 'Self-hosted email lists for groups, clubs and teams — running entirely on Cloudflare Workers.',
+  narrow = false,
+} = Astro.props;
+const user = Astro.locals.user;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header class="nav">
+      <div class="container nav-inner">
+        <a class="brand" href="/">
+          <span class="brand-mark">✉</span>
+          <span>CF-Email-Groups</span>
+        </a>
+        <div class="nav-spacer"></div>
+        {user ? (
+          <div class="nav-links">
+            <a class="btn btn-ghost btn-sm" href="/app">Dashboard</a>
+            <UserMenu user={user} client:load />
+          </div>
+        ) : (
+          <a class="btn btn-sm" href="/login">Sign in</a>
+        )}
+      </div>
+    </header>
+    <main class={narrow ? 'container-narrow' : 'container'}>
+      <slot />
+    </main>
+  </body>
+</html>

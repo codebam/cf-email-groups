@@ -1,0 +1,45 @@
+# Copy to `.dev.vars` for local development:  cp .dev.vars.example .dev.vars
+# Values here override the matching `vars` in wrangler.jsonc while running locally.
+
+ENVIRONMENT=development
+
+# Local origin, used for OAuth callbacks and links in emails.
+APP_URL=http://localhost:4321
+
+# Never redirect local requests to the production domain.
+ENFORCE_CANONICAL_HOST=0
+
+# Enables the local-only /api/auth/dev?login=you shortcut (never set in production).
+DEV_AUTH=1
+
+# This project deploys in single-list mode (wrangler.jsonc: SINGLE_LIST=1).
+# Uncomment to develop multi-list behaviour locally instead:
+# SINGLE_LIST=0
+
+# Sign-in allow-list. Production uses ALLOWED_GITHUB_LOGINS=codebam from
+# wrangler.jsonc; the local dev sign-in shortcut bypasses it. Uncomment to test
+# the real flow with GitHub locally:
+# ALLOWED_GITHUB_LOGINS=codebam
+
+# GitHub OAuth App — https://github.com/settings/developers
+# Local callback URL: http://localhost:4321/api/auth/github/callback
+# Production callback URL: https://lists.seanbehan.ca/api/auth/github/callback
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
+# Email delivery. Leave EMAIL_PROVIDER unset to auto-detect:
+#   RESEND_API_KEY set            -> Resend (best for newsletters)
+#   otherwise                     -> Cloudflare `send_email` binding (simulated locally)
+# Force one with: EMAIL_PROVIDER=resend | cloudflare | log
+# `log` only records mail in the local outbox and sends nothing.
+# EMAIL_PROVIDER=resend
+# RESEND_API_KEY=re_xxxxxxxxx
+
+# Sender used when the list has no From address of its own. Locally any address
+# works because delivery is simulated. In production this must be on a domain
+# verified by your email provider (Resend or Cloudflare Email Service).
+EMAIL_FROM=Sean Behan <lists@seanbehan.ca>
+
+# Optional: Cloudflare Turnstile on public sign-up forms (both required).
+# PUBLIC_TURNSTILE_SITE_KEY=
+# TURNSTILE_SECRET=

@@ -1,0 +1,31 @@
+---
+import Base from '../../layouts/Base.astro';
+import JoinPanel from '../../components/JoinPanel.astro';
+import { getEnv } from '../../lib/config';
+import { getGroupBySlug } from '../../lib/groups';
+import { singleListConfig } from '../../lib/single';
+import type { PublicGroup } from '../../lib/types';
+
+const env = getEnv();
+const single = singleListConfig(env);
+if (single && Astro.params.slug !== single.slug) return Astro.redirect('/');
+
+const group = await getGroupBySlug(env.DB, Astro.params.slug!);
+const closed = !group || group.public_signup !== 1;
+const requiresTurnstile = Boolean(env.TURNSTILE_SECRET && env.PUBLIC_TURNSTILE_SITE_KEY);
+
+const publicGroup: PublicGroup | null = group
+  ? {
+      name: group.name,
+      slug: group.slug,
+      description: group.description,
+      doubleOptIn: group.double_opt_in === 1,
+      requiresTurnstile,
+      turnstileSiteKey: env.PUBLIC_TURNSTILE_SITE_KEY ?? null,
+    }
+  : null;
+---
+
+<Base title={group ? `Join ${group.name}` : 'List not found'} narrow>
+  <div class="join-card">{closed || !publicGroup ? <JoinPanel group={null} /> : <JoinPanel group={publicGroup} />}</div>
+</Base>

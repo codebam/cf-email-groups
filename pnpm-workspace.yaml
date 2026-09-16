@@ -1,0 +1,17 @@
+# pnpm needs explicit permission to run these packages' install scripts.
+allowBuilds:
+  esbuild: true
+  workerd: true
+
+# These assets ship alongside wrangler on a very fresh release cadence; keep the
+# local minimum-release-age policy from blocking the lockfile. Safe to delete if
+# your environment does not enforce a release-age policy.
+minimumReleaseAgeExclude:
+  - '@cloudflare/workerd-darwin-64@1.20260915.1'
+  - '@cloudflare/workerd-darwin-arm64@1.20260915.1'
+  - '@cloudflare/workerd-linux-64@1.20260915.1'
+  - '@cloudflare/workerd-linux-arm64@1.20260915.1'
+  - '@cloudflare/workerd-windows-64@1.20260915.1'
+  - miniflare@5.20260915.0-alpha
+  - workerd@1.20260915.1
+  - wrangler@4.132.0

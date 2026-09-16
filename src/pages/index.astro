@@ -1,0 +1,139 @@
+---
+import Base from '../layouts/Base.astro';
+import JoinPanel from '../components/JoinPanel.astro';
+import { getEnv } from '../lib/config';
+import { getGroupBySlug } from '../lib/groups';
+import { singleListConfig } from '../lib/single';
+import type { PublicGroup } from '../lib/types';
+
+const env = getEnv();
+const single = singleListConfig(env);
+const user = Astro.locals.user;
+
+let publicGroup: PublicGroup | null = null;
+if (single) {
+  if (user) return Astro.redirect('/app');
+  const group = await getGroupBySlug(env.DB, single.slug);
+  if (group && group.public_signup === 1) {
+    publicGroup = {
+      name: group.name,
+      slug: group.slug,
+      description: group.description,
+      doubleOptIn: group.double_opt_in === 1,
+      requiresTurnstile: Boolean(env.TURNSTILE_SECRET && env.PUBLIC_TURNSTILE_SITE_KEY),
+      turnstileSiteKey: env.PUBLIC_TURNSTILE_SITE_KEY ?? null,
+    };
+  }
+}
+---
+
+<Base
+  title={publicGroup ? `Join ${publicGroup.name}` : 'CF-Email-Groups'}
+  description={single ? `Sign up for ${single.name} — occasional updates, no spam, unsubscribe any time.` : undefined}
+  narrow={Boolean(single)}
+>
+  {single ? (
+    <div class="join-card">
+      <JoinPanel group={publicGroup} />
+    </div>
+  ) : (
+    <>
+      <section class="hero">
+        <div class="eyebrow">Cloudflare Workers · D1 · Astro + Preact</div>
+        <h1>Email lists for your group, without the SaaS</h1>
+        <p class="lead">
+          Public sign-up pages, double opt-in, subscriber management, and Markdown campaigns — a complete mailing-list
+          admin running on your own Cloudflare account.
+        </p>
+        <div class="hero-actions">
+          {user ? (
+            <a class="btn" href="/app">Open dashboard</a>
+          ) : (
+            <a class="btn" href="/login">Sign in with GitHub</a>
+          )}
+          <a class="btn btn-secondary" href="#how">How it works</a>
+        </div>
+      </section>
+
+      <section class="grid grid-3" style="margin-bottom:3.5rem">
+        <div class="card card-pad">
+          <div class="feature-icon" aria-hidden="true">✍️</div>
+          <h3>Sign-ups that just work</h3>
+          <p class="muted small">
+            Every list gets a clean public page with honeypot and optional Turnstile spam protection. Double opt-in keeps
+            your list clean and your sender reputation healthy.
+          </p>
+        </div>
+        <div class="card card-pad">
+          <div class="feature-icon" aria-hidden="true">👥</div>
+          <h3>Admins, not shared passwords</h3>
+          <p class="muted small">
+            Sign in with GitHub. Invite collaborators by username before they've even signed up, with owner and admin
+            roles per list.
+          </p>
+        </div>
+        <div class="card card-pad">
+          <div class="feature-icon" aria-hidden="true">📨</div>
+          <h3>Campaigns with a paper trail</h3>
+          <p class="muted small">
+            Write in Markdown with live preview, send a test, then deliver in batches with per-recipient tracking and
+            automatic unsubscribe links.
+          </p>
+        </div>
+        <div class="card card-pad">
+          <div class="feature-icon" aria-hidden="true">🗄️</div>
+          <h3>Your data, your D1</h3>
+          <p class="muted small">
+            Users, lists, subscribers, campaigns, and sessions live in Cloudflare D1. Export any list as CSV whenever
+            you like.
+          </p>
+        </div>
+        <div class="card card-pad">
+          <div class="feature-icon" aria-hidden="true">📮</div>
+          <h3>Cloudflare or Resend email</h3>
+          <p class="muted small">
+            Uses Cloudflare Email Service's <code>send_email</code> binding out of the box, or point it at Resend with one
+            environment variable for high-volume newsletters.
+          </p>
+        </div>
+        <div class="card card-pad">
+          <div class="feature-icon" aria-hidden="true">🌗</div>
+          <h3>Small, fast, and private</h3>
+          <p class="muted small">
+            One Worker serves the Astro frontend, Preact islands, and JSON API. No analytics, no third-party trackers, no
+            vendor lock-in beyond Cloudflare itself.
+          </p>
+        </div>
+      </section>
+
+      <section id="how" class="card card-pad" style="margin-bottom:3rem">
+        <h2>How it works</h2>
+        <div class="grid grid-3" style="margin-top:1rem">
+          <div>
+            <h3>1 · Create a list</h3>
+            <p class="muted small">
+              Pick a name, slug, and sender identity. Share the generated <code>/join/your-list</code> link anywhere.
+            </p>
+          </div>
+          <div>
+            <h3>2 · Grow it</h3>
+            <p class="muted small">
+              Subscribers confirm by email, admins can add people directly, and CSV imports handle existing lists.
+            </p>
+          </div>
+          <div>
+            <h3>3 · Send</h3>
+            <p class="muted small">
+              Compose, preview, test, and send. Bounces and complaints from your provider's webhook are suppressed
+              automatically.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <p class="center muted small">
+        Open source, MIT licensed. Bring your own Cloudflare account and email provider.
+      </p>
+    </>
+  )}
+</Base>
