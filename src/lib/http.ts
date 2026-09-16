@@ -48,6 +48,16 @@ export function requireUser(locals: App.Locals): SessionUser {
   return locals.user;
 }
 
+function mediaType(contentType: string | null | undefined): string {
+  return (contentType ?? '').split(';', 1)[0]!.trim().toLowerCase();
+}
+
+/** True for `application/x-www-form-urlencoded` and `multipart/form-data`. */
+export function isFormContentType(contentType: string | null | undefined): boolean {
+  const type = mediaType(contentType);
+  return type === 'application/x-www-form-urlencoded' || type === 'multipart/form-data';
+}
+
 export async function readJson(request: Request, maxBytes = 1_000_000): Promise<Record<string, unknown>> {
   const declared = Number(request.headers.get('content-length') ?? '0');
   if (declared > maxBytes) throw new HttpError(413, 'Request body is too large.');
@@ -64,6 +74,46 @@ export async function readJson(request: Request, maxBytes = 1_000_000): Promise<
     if (error instanceof HttpError) throw error;
     throw new HttpError(400, 'Invalid JSON body.');
   }
+}
+
+/**
+ * Reads a JSON, url-encoded or multipart request body into a flat object.
+ * Form fields are strings; repeated field names keep the first value (the
+ * same value `URLSearchParams.get()` and an HTML form would surface first).
+ * Anything that is not a form content-type is parsed as JSON, preserving the
+ * original API contract.
+ */
+export async function readBody(request: Request, maxBytes = 1_000_000): Promise<Record<string, unknown>> {
+  const declared = Number(request.headers.get('content-length') ?? '0');
+  if (declared > maxBytes) throw new HttpError(413, 'Request body is too large.');
+  const type = mediaType(request.headers.get('content-type'));
+
+  if (type === 'application/x-www-form-urlencoded') {
+    const text = await request.text();
+    if (text.length > maxBytes) throw new HttpError(413, 'Request body is too large.');
+    const params = new URLSearchParams(text);
+    const body: Record<string, unknown> = {};
+    for (const [key, value] of params) {
+      if (!(key in body)) body[key] = value;
+    }
+    return body;
+  }
+
+  if (type === 'multipart/form-data') {
+    let form: FormData;
+    try {
+      form = await request.formData();
+    } catch {
+      throw new HttpError(400, 'Invalid form body.');
+    }
+    const body: Record<string, unknown> = {};
+    for (const [key, value] of form) {
+      if (typeof value === 'string' && !(key in body)) body[key] = value;
+    }
+    return body;
+  }
+
+  return readJson(request, maxBytes);
 }
 
 export interface StringOptions {
@@ -194,6 +244,15 @@ export async function rateLimit(db: D1Database, key: string, limit: number, wind
   return (row?.count ?? 1) <= limit;
 }
 
+function emptyResponse(status: number, headers: Record<string, string> = {}): Response {
+  return new Response(null, { status, headers: { 'cache-control': 'no-store', ...headers } });
+}
+
 export function noContent(): Response {
-  return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+  return emptyResponse(204);
+}
+
+/** 303 See Other with a Location header; used by the no-JS form flow. */
+export function seeOther(location: string): Response {
+  return emptyResponse(303, { location });
 }

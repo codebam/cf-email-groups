@@ -43,3 +43,9 @@ EMAIL_FROM=Sean Behan <lists@seanbehan.ca>
 # Optional: Cloudflare Turnstile on public sign-up forms (both required).
 # PUBLIC_TURNSTILE_SITE_KEY=
 # TURNSTILE_SECRET=
+
+# Origins allowed to post directly to /api/public/subscribe. Production sets
+# https://seanbehan.ca,https://codebam.ca in wrangler.jsonc. Uncomment to test
+# the no-JS form flow from another local host page (exact origin, no trailing
+# slash, no wildcards).
+# ALLOWED_SIGNUP_ORIGINS=http://localhost:5173

@@ -34,6 +34,8 @@ export interface AppBindings {
   PUBLIC_TURNSTILE_SITE_KEY?: string;
   /** Optional comma-separated GitHub logins allowed to sign in. */
   ALLOWED_GITHUB_LOGINS?: string;
+  /** Comma-separated browser origins allowed to post to the public sign-up endpoint. */
+  ALLOWED_SIGNUP_ORIGINS?: string;
   /** Set to "1" for a deployment dedicated to one mailing list. */
   SINGLE_LIST?: string;
   SINGLE_LIST_SLUG?: string;

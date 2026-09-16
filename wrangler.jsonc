@@ -49,6 +49,9 @@
 		"SINGLE_LIST_DESCRIPTION": "Occasional updates from Sean. No spam, unsubscribe any time.",
 		// Only this GitHub account can sign in; it becomes the list owner.
 		"ALLOWED_GITHUB_LOGINS": "codebam",
+		// Browser origins allowed to post directly to /api/public/subscribe
+		// (exact scheme://host[:port], comma-separated, no wildcards).
+		"ALLOWED_SIGNUP_ORIGINS": "https://seanbehan.ca,https://codebam.ca",
 		// Must be on a domain verified by Resend or onboarded to Cloudflare Email Service.
 		"EMAIL_FROM": "Sean Behan <lists@seanbehan.ca>"
 	}

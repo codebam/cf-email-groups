@@ -8,6 +8,9 @@ export default defineConfig({
   output: 'server',
   adapter: cloudflare({ imageService: 'passthrough' }),
   vite: {
+    // Astro/Vite must not answer CORS preflights for us in dev: /api/public/subscribe
+    // owns its origin policy (ALLOWED_SIGNUP_ORIGINS), matching production Workers.
+    server: { cors: false },
     // Avoid loading two copies of Preact (components + SSR renderer) in workerd.
     resolve: {
       dedupe: ['preact', 'preact/hooks', 'preact/jsx-runtime'],

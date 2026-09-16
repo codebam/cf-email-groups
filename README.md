@@ -53,7 +53,7 @@ GET /api/dev/outbox?to=someone@example.com&kind=confirm
 ### Tests
 
 ```bash
-pnpm test     # 24 unit tests (markdown/CSV/tokens/templates/single-list config)
+pnpm test     # unit tests: public sign-up origin/form/JSON behaviour, markdown, CSV, tokens, templates, single-list
 pnpm smoke    # full E2E against a running dev server
 ```
 
@@ -92,6 +92,112 @@ To develop multi-list behaviour locally, set `SINGLE_LIST=0` in `.dev.vars`. To 
 
 ---
 
+## Direct no-JS sign-up forms (host sites)
+
+Pages on an allow-listed origin can post a plain HTML form straight to
+`POST /api/public/subscribe` — no JavaScript, no iframe, and no server-side
+proxy. The allow-list is the non-secret `ALLOWED_SIGNUP_ORIGINS` var: a
+comma-separated list of exact `scheme://host[:port]` origins. This deployment
+sets:
+
+```jsonc
+"ALLOWED_SIGNUP_ORIGINS": "https://seanbehan.ca,https://codebam.ca"
+```
+
+Example form for a host page on `https://seanbehan.ca` (the page can be static
+HTML; the hidden fields are the entire integration):
+
+```html
+<form method="post" action="https://lists.seanbehan.ca/api/public/subscribe">
+  <input type="hidden" name="slug" value="seanbehan" />
+  <input type="email" name="email" required />
+  <input type="text" name="name" />
+  <!-- `next` must be a same-origin path, or an absolute http(s) URL whose
+       origin is this host or on ALLOWED_SIGNUP_ORIGINS. -->
+  <input type="hidden" name="next" value="https://seanbehan.ca/test-page" />
+  <!-- Honeypot: off-screen to humans, tempting to bots. -->
+  <div style="position:absolute;left:-9999px" aria-hidden="true">
+    <label>Website
+      <input type="text" name="website" tabindex="-1" autocomplete="off" />
+    </label>
+  </div>
+  <button type="submit">Subscribe</button>
+</form>
+```
+
+The browser follows the `303 See Other` immediately, so the visitor lands back
+on `next` (or `/join/<slug>`) with a result query param to render:
+
+| Redirect param | Meaning |
+| --- | --- |
+| `subscribed=confirm` | Subscriber is pending; a double opt-in confirmation email was sent (honeypot submissions get this shape too, without creating a subscriber) |
+| `subscribed=done` | Subscriber is active (double opt-in disabled, or address was already active) |
+| `subscribe_error=invalid` | Missing/invalid field or email; a malformed form body |
+| `subscribe_error=rate` | IP rate limit hit (`15 / 10 min`); per-address throttle instead fakes success |
+| `subscribe_error=unavailable` | List missing/closed, or an unexpected backend failure |
+| `subscribe_error=turnstile` | Turnstile is enabled and the form's token is missing/failed (see below) |
+
+The redirect URL keeps `next`'s existing query string and replaces stale
+`subscribed` / `subscribe_error` params. A missing or unsafe `next` falls back
+to `/join/<slug>` on the service origin.
+
+**`next` rules (open-redirect guard).** Accepted targets are only:
+
+- absolute same-origin paths (`/test-page?campaign=1#top`);
+- absolute `http(s)` URLs whose normalized origin is either the service origin
+  or an `ALLOWED_SIGNUP_ORIGINS` entry, with no userinfo.
+
+Protocol-relative URLs (`//host`), backslashes, control characters, credentials
+in the authority, and non-`http(s)` schemes are ignored. An invalid `next`
+never produces a 3xx to the attacker's URL; the response goes to `/join/<slug>`.
+
+**Content types and fields.** `application/x-www-form-urlencoded` and
+`multipart/form-data` are parsed alongside `application/json`; the same field
+validation, group lookup, honeypot, IP/address rate limits, and double opt-in
+path run for all three. The fields are `slug`, `email`, `name`, `website`
+(honeypot), `turnstileToken` (or the Turnstile widget's implicit
+`cf-turnstile-response`), and `next`.
+
+**JSON/CORS compatibility.** Requests with no `Origin` still work exactly as
+before (the current host-site proxy sends JSON with no `Origin`). Same-origin
+JSON and JSON from an allow-listed origin return the original JSON body:
+`{ ok, requiresConfirmation, existed, warning? }` on success, or
+`{ error: "..." }` on failure. Allow-listed JSON callers additionally get
+`Access-Control-Allow-Origin: <exact origin>` + `Vary: Origin` (never `*`, no
+credentials); `OPTIONS` preflight answers `POST, OPTIONS` + `Content-Type`.
+The no-JS form flow needs none of that — form navigation is not subject to
+CORS. JSON callers always get the JSON response; `next` only affects form
+posts.
+
+**Turnstile.** A list requires Turnstile only when both `TURNSTILE_SECRET` and
+`PUBLIC_TURNSTILE_SITE_KEY` are configured (the `seanbehan` list is
+`requiresTurnstile=false` today). The public site key is the deployment's
+`PUBLIC_TURNSTILE_SITE_KEY` (also exposed by `GET /api/public/groups/<slug>`
+for server-side host tooling). JSON/JS clients send `turnstileToken`. A form can
+pass a token only if the host page renders the Turnstile widget with that site
+key; the widget injects a hidden `cf-turnstile-response` field and requires
+client-side JavaScript. So a literal JavaScript-off form cannot pass a
+Turnstile-protected list. Missing/failed tokens redirect with
+`subscribe_error=turnstile` (JSON callers get the usual
+`400 {"error":"Verification failed..."}`).
+
+Host-site constraints:
+
+- Use the absolute action URL `https://lists.seanbehan.ca/api/public/subscribe`.
+- `slug` must be the public list slug and the list must have sign-ups enabled.
+- The `next` page must be on the host's own allow-listed origin (or a
+  same-origin path on the list service); third-party return URLs are ignored.
+- Add the exact host origin (`https://codebam.ca`, `https://www.seanbehan.ca`,
+  a local dev origin, …) to `ALLOWED_SIGNUP_ORIGINS` and redeploy before
+  pointing a form there. Wildcards, subdomain inference, and credentials are
+  intentionally unsupported.
+- Keep the honeypot field submittable but off-screen; don't switch it to
+  `type="hidden"` (`website` must remain a text field that bots will fill).
+- No cookies/credentials are sent or accepted on the cross-origin route; the
+  endpoint is unauthenticated by design, as before.
+
+---
+
 ## Deploy to lists.seanbehan.ca
 
 Prerequisites:
@@ -127,6 +233,17 @@ first-time testing without DNS, temporarily remove the `routes` block and set `"
 
 OAuth note: a GitHub OAuth App supports one callback URL. Use a second app (or temporarily change the callback) if you
 want GitHub sign-in on a workers.dev preview as well as the custom domain.
+
+### Deploying the direct sign-up allow-list
+
+`ALLOWED_SIGNUP_ORIGINS` is a plain non-secret `vars` entry. This deployment ships
+`https://seanbehan.ca,https://codebam.ca` (see [Direct no-JS sign-up forms](#direct-no-js-sign-up-forms-host-sites)).
+To change it, edit that line in `wrangler.jsonc`, run `pnpm deploy`, and the new origin is live. No D1 migration or
+secret rotation is involved.
+
+The existing host-site same-origin proxy is unaffected because no-`Origin` JSON still returns the original JSON
+responses. Leave that proxy running until the direct form works in production, then remove it; no Worker change is
+needed when the proxy goes away.
 
 ---
 
@@ -210,6 +327,7 @@ endpoint verifies the Svix signature and marks subscribers `bounced`/`complained
 | `ENFORCE_CANONICAL_HOST` | var | Redirect production HTML traffic to `APP_URL`'s host |
 | `SINGLE_LIST` / `SINGLE_LIST_SLUG` / `SINGLE_LIST_NAME` / `SINGLE_LIST_DESCRIPTION` | var | Dedicated-list configuration |
 | `ALLOWED_GITHUB_LOGINS` | var | Comma-separated sign-in allow-list; first entry is the preferred owner |
+| `ALLOWED_SIGNUP_ORIGINS` | var | Comma-separated exact origins allowed to post directly to `/api/public/subscribe` (no-JS forms + CORS); no wildcards |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | secret | GitHub OAuth app |
 | `EMAIL_PROVIDER` | var | `cloudflare` \| `resend` \| `log` (auto-detected when empty) |
 | `EMAIL_FROM` | var | Sender, `Name <address@domain>` |
@@ -228,6 +346,7 @@ Secrets are set with `pnpm wrangler secret put <NAME>`; nothing sensitive belong
 src/
   lib/            server + pure logic
     single.ts     single-list/allow-list config (unit-tested)
+    public signup: public-signup.ts (shared JSON/form flow), signup-origins.ts (origin allow-list + next safety)
     auth: github.ts, sessions.ts, users.ts
     data: db.ts, groups.ts, subscribers.ts, campaigns.ts
     mail: email.ts (providers + outbox), templates.ts
@@ -269,12 +388,15 @@ concurrent senders can't double-send. For very large lists, move the same batch 
 | `POST /api/campaigns/:id/send` | Send the next batch (returns progress) |
 | `POST /api/campaigns/:id/test` | Send a preview to yourself |
 | `POST /api/public/subscribe` | Public sign-up (honeypot, rate limit, Turnstile) |
+| `OPTIONS /api/public/subscribe` | CORS preflight for allow-listed JSON callers (no wildcard, no credentials) |
 | `POST /api/public/unsubscribe?token=…` | RFC 8058 one-click unsubscribe |
 | `POST /api/webhooks/resend` | Bounce/complaint suppression |
 | `GET /api/health` | Health check |
 
 All state-changing API routes require a session and check list membership; mutations also get a same-origin check
-(SameSite=Lax cookies plus an `Origin` header check in `src/middleware.ts`).
+(SameSite=Lax cookies plus an `Origin` header check in `src/middleware.ts`). The public sign-up route is the one
+exception: it still rejects unknown browser origins, but origins in `ALLOWED_SIGNUP_ORIGINS` may post directly (with
+form redirects and an exact-origin CORS policy) while no-`Origin` server-to-server JSON continues to work.
 
 ---
 
@@ -286,6 +408,7 @@ All state-changing API routes require a session and check list membership; mutat
 - Session tokens are 32 random bytes; only their SHA-256 hash is stored in D1. Cookies are `HttpOnly`,
   `SameSite=Lax`, and `Secure` on HTTPS.
 - Public sign-ups are rate-limited per IP and per address; optional Turnstile and a honeypot are built in.
+- Direct cross-origin sign-up posts are restricted to exact `ALLOWED_SIGNUP_ORIGINS`; CORS never uses `*` or credentials, and `next` is validated against same-origin paths plus allow-listed origins (no open redirect).
 - Campaign Markdown is escaped/sanitized before rendering; link URLs are scheme-checked.
 - Email headers are stripped of CR/LF to prevent header injection.
 - Resend webhooks are verified with the Svix signature scheme and a 5-minute timestamp window.

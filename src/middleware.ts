@@ -83,8 +83,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   // Same-origin guard for cookie-authenticated mutations (SameSite=Lax plus Origin check).
+  // /api/public/subscribe owns its configurable origin policy (ALLOWED_SIGNUP_ORIGINS)
+  // because it is intentionally reachable from allow-listed host pages.
+  const publicSubscribe = context.url.pathname === '/api/public/subscribe';
   if (
     context.url.pathname.startsWith('/api/') &&
+    !publicSubscribe &&
     ['POST', 'PUT', 'PATCH', 'DELETE'].includes(context.request.method)
   ) {
     const origin = context.request.headers.get('origin');
