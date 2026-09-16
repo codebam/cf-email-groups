@@ -1,9 +1,29 @@
 import { defineMiddleware } from 'astro:middleware';
 import { getEnv, isProduction } from './lib/config';
+import { assertSchemaApplied, isMissingSchemaError } from './lib/db';
 import { ensureSingleList, ensureSingleListMembership } from './lib/groups';
 import { json } from './lib/http';
 import { getUserFromRequest } from './lib/sessions';
 import { isLoginAllowed, singleListConfig } from './lib/single';
+
+let lastSchemaCheck = 0;
+
+/** Cheap probe, memoised per isolate so we don't hit D1 on every request. */
+async function schemaIsUsable(db: D1Database): Promise<boolean> {
+  if (Date.now() - lastSchemaCheck < 60_000) return true;
+  try {
+    await assertSchemaApplied(db);
+    lastSchemaCheck = Date.now();
+    return true;
+  } catch (error) {
+    if (isMissingSchemaError(error)) {
+      console.error('[cf-email-groups] D1 schema missing — run: pnpm db:migrate:remote');
+      return false;
+    }
+    console.error('[cf-email-groups] D1 schema probe failed', error);
+    return true; // Let the request surface the real error.
+  }
+}
 
 const SECURITY_HEADERS: Record<string, string> = {
   'x-content-type-options': 'nosniff',
@@ -14,6 +34,17 @@ const SECURITY_HEADERS: Record<string, string> = {
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const env = getEnv();
+  // /api/health reports DB state itself; everything else gets the friendly 503.
+  if (context.url.pathname !== '/api/health' && !(await schemaIsUsable(env.DB))) {
+    return new Response(
+      'CF-Email-Groups: the D1 database has not been initialised.\n\n' +
+        'Apply the schema and reload:\n' +
+        '  pnpm db:migrate:remote\n' +
+        '  # or: pnpm exec wrangler d1 migrations apply DB --remote\n',
+      { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } },
+    );
+  }
+
   let user = await getUserFromRequest(context.request, env.DB).catch((error) => {
     console.error('[cf-email-groups] session lookup failed', error);
     return null;

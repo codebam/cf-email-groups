@@ -23,3 +23,14 @@ export function likePattern(query: string): string {
 export function boolToInt(value: boolean): number {
   return value ? 1 : 0;
 }
+
+/** True when D1 reports that a table (usually `groups`) does not exist yet. */
+export function isMissingSchemaError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /no such table/i.test(message);
+}
+
+/** Throws if the D1 schema has not been applied yet. */
+export async function assertSchemaApplied(db: D1Database): Promise<void> {
+  await db.prepare('SELECT 1 AS ok FROM groups LIMIT 1').first();
+}

@@ -43,7 +43,8 @@ step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 json() { curl -fsS -b "$JAR" -c "$JAR" "$@"; }
 
 step "0 · Server reachable"
-curl -fsS -m 5 "$BASE/api/health" | jq -e '.ok == true' >/dev/null || fail "no healthy server at $BASE"
+HEALTH="$(curl -fsS -m 5 "$BASE/api/health")"
+echo "$HEALTH" | jq -e '.ok == true' >/dev/null || fail "unhealthy server at $BASE (db status: $(echo "$HEALTH" | jq -r '.db // "unknown"')). Run: pnpm db:migrate:local"
 pass "$BASE/api/health"
 
 if ! json "$BASE/api/dev/outbox?limit=1" >/dev/null 2>&1; then

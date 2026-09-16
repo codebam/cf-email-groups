@@ -130,6 +130,39 @@ want GitHub sign-in on a workers.dev preview as well as the custom domain.
 
 ---
 
+## Troubleshooting
+
+### The site returns a blank 500 right after deploy
+
+The Worker is fine; the **remote D1 database has no schema**. The Worker's first query (`SELECT ... FROM groups`)
+throws `D1_ERROR: no such table: groups`, which is exactly a bare 500 with an empty body. Apply the migrations to the
+remote database:
+
+```bash
+# Check whether the migration is recorded remotely:
+pnpm exec wrangler d1 migrations list DB --remote
+
+# Apply it:
+pnpm db:migrate:remote
+# or: pnpm exec wrangler d1 migrations apply DB --remote
+
+# Confirm the tables exist:
+pnpm exec wrangler d1 execute DB --remote --command \
+  "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+```
+
+No redeploy is needed — D1 lives outside the Worker. Reload `https://lists.seanbehan.ca/` afterwards.
+
+If it still fails:
+
+- `pnpm exec wrangler d1 list` — confirm the `database_id` in `wrangler.jsonc` matches the database you migrated.
+- `pnpm exec wrangler tail cf-email-groups --format pretty` in one terminal while loading the site in another; the live
+  exception is printed there.
+- `https://lists.seanbehan.ca/api/health` now reports `"db": "ok" | "unmigrated"`, and the app returns a plain-text 503
+  with the migration command instead of a blank 500 (redeploy to get this newer behaviour).
+
+---
+
 ## Configure email delivery
 
 The provider is chosen at send time:
