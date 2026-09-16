@@ -105,7 +105,7 @@ export async function sendTestCampaign(
   to: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const { subject, bodyMd } = validateCampaignInput(input);
-  const rendered = testEmail({ group, subject, bodyMd });
+  const rendered = testEmail({ group, subject, bodyMd, subscriber: { email: to } });
   const result = await sendEmail(env, db, {
     to,
     subject: rendered.subject,

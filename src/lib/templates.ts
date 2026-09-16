@@ -1,4 +1,5 @@
 import { escapeHtml, excerpt, markdownToText, renderMarkdown } from './markdown';
+import { personalize, SAMPLE_SUBSCRIBER, type MergeData } from './personalize';
 import type { CampaignRow, GroupRow, SubscriberRow } from './types';
 
 export interface RenderedEmail {
@@ -107,16 +108,19 @@ export function campaignEmail(options: {
   subscriber: Pick<SubscriberRow, 'email' | 'name' | 'unsubscribe_token'>;
   unsubscribeUrl: string;
 }): RenderedEmail {
+  const mergeData = { name: options.subscriber.name, email: options.subscriber.email };
+  const subject = personalize(options.campaign.subject, mergeData);
+  const bodyMd = personalize(options.campaign.body_md, mergeData);
   return {
-    subject: options.campaign.subject,
+    subject,
     html: layout({
       groupName: options.group.name,
-      preheader: excerpt(options.campaign.body_md),
-      body: renderMarkdown(options.campaign.body_md),
+      preheader: excerpt(bodyMd),
+      body: renderMarkdown(bodyMd),
       footer: `You're receiving this because you subscribed to ${escapeHtml(options.group.name)}.<br>
 <a href="${escapeHtml(options.unsubscribeUrl)}" style="color:#64748b">Unsubscribe</a> from these emails.`,
     }),
-    text: `${markdownToText(options.campaign.body_md)}\n\n---\nYou're receiving this because you subscribed to ${options.group.name}.\nUnsubscribe: ${options.unsubscribeUrl}`,
+    text: `${markdownToText(bodyMd)}\n\n---\nYou're receiving this because you subscribed to ${options.group.name}.\nUnsubscribe: ${options.unsubscribeUrl}`,
   };
 }
 
@@ -124,17 +128,25 @@ export function testEmail(options: {
   group: Pick<GroupRow, 'name'>;
   subject: string;
   bodyMd: string;
+  /** Sample data used to preview merge tokens; defaults to SAMPLE_SUBSCRIBER, with the recipient's address when known. */
+  subscriber?: MergeData;
 }): RenderedEmail {
+  const subscriber: MergeData = {
+    name: options.subscriber?.name ?? SAMPLE_SUBSCRIBER.name,
+    email: options.subscriber?.email ?? SAMPLE_SUBSCRIBER.email,
+  };
+  const subject = personalize(options.subject, subscriber);
+  const bodyMd = personalize(options.bodyMd, subscriber);
   return {
-    subject: `[Test] ${options.subject || '(no subject)'}`,
+    subject: `[Test] ${subject || '(no subject)'}`,
     html: layout({
       groupName: options.group.name,
       preheader: 'Test send from CF-Email-Groups',
       title: 'Test send',
-      body: `<p style="margin:0 0 16px;color:#64748b;font-size:13px">This is a preview of a campaign for <strong>${escapeHtml(options.group.name)}</strong>. No subscribers received it.</p>${renderMarkdown(options.bodyMd)}`,
+      body: `<p style="margin:0 0 16px;color:#64748b;font-size:13px">This is a preview of a campaign for <strong>${escapeHtml(options.group.name)}</strong>. No subscribers received it.</p>${renderMarkdown(bodyMd)}`,
       footer: 'Sent from CF-Email-Groups.',
     }),
-    text: `[Test] ${options.subject}\n\n${markdownToText(options.bodyMd)}`,
+    text: `[Test] ${subject}\n\n${markdownToText(bodyMd)}`,
   };
 }
 

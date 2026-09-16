@@ -8,7 +8,7 @@ A dedicated email sign-up page and mailing-list admin for **lists.seanbehan.ca**
 - **Only GitHub user `@codebam` can sign in** (`ALLOWED_GITHUB_LOGINS=codebam`). That account becomes the list owner.
 - **Astro + Preact islands** frontend, **Cloudflare D1** database, **GitHub OAuth**, no passwords.
 - **Double opt-in** sign-ups with honeypot + optional Turnstile, CSV import/export, admin invites, Markdown campaigns
-  with test sends, batched delivery, and per-recipient tracking.
+  with per-subscriber tokens (`{{name}}`, `{{first_name}}`, `{{email}}`), test sends, batched delivery, and tracking.
 - **RFC 8058 one-click unsubscribe** plus a friendly unsubscribe page.
 - **Pluggable email**: Cloudflare Email Service (`send_email` binding) or Resend.
 
@@ -350,7 +350,7 @@ src/
     auth: github.ts, sessions.ts, users.ts
     data: db.ts, groups.ts, subscribers.ts, campaigns.ts
     mail: email.ts (providers + outbox), templates.ts
-    util: ids.ts, markdown.ts, csv.ts, http.ts, config.ts
+    util: ids.ts, markdown.ts, csv.ts, personalize.ts, http.ts, config.ts
   middleware.ts   session lookup, allow-list, single-list bootstrap, canonical host, security headers
   pages/          Astro SSR pages + JSON API routes under /api
   components/     Preact islands (GroupApp, tabs, SignupForm, JoinPanel, UserMenu)
@@ -370,6 +370,11 @@ Public sign-ups are double opt-in by default; admins and CSV imports can mark ad
 **Campaign sending.** The UI calls `POST /api/campaigns/:id/send` repeatedly. Each call claims a batch of up to 100
 subscribers, renders a personalised email, records a `campaign_sends` row, and compare-and-swaps a cursor so two
 concurrent senders can't double-send. For very large lists, move the same batch function behind Cloudflare Queues.
+
+**Campaign tokens.** Subjects and bodies support `{{name}}`, `{{first_name}}`, and `{{email}}`. Tokens are
+case-insensitive, missing names fall back to `there` (so `Hi {{name}},` reads `Hi there,`), and unknown tokens are
+left verbatim. The editor preview and test sends use sample subscriber data (`Alex Example <alex@example.com>`, or
+the test recipient address for `{{email}}`); every real delivery still gets its own unsubscribe link.
 
 ---
 
@@ -409,7 +414,7 @@ form redirects and an exact-origin CORS policy) while no-`Origin` server-to-serv
   `SameSite=Lax`, and `Secure` on HTTPS.
 - Public sign-ups are rate-limited per IP and per address; optional Turnstile and a honeypot are built in.
 - Direct cross-origin sign-up posts are restricted to exact `ALLOWED_SIGNUP_ORIGINS`; CORS never uses `*` or credentials, and `next` is validated against same-origin paths plus allow-listed origins (no open redirect).
-- Campaign Markdown is escaped/sanitized before rendering; link URLs are scheme-checked.
+- Campaign Markdown is escaped/sanitized after `{{token}}` interpolation; subscriber names cannot inject raw HTML, and link URLs are scheme-checked.
 - Email headers are stripped of CR/LF to prevent header injection.
 - Resend webhooks are verified with the Svix signature scheme and a 5-minute timestamp window.
 - Production HTML traffic is redirected to `APP_URL`, so the admin UI isn't reachable on workers.dev.

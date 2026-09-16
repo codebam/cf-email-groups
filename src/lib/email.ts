@@ -2,6 +2,7 @@ import { isProduction, type AppBindings, type SendEmailBinding } from './config'
 import { execute } from './db';
 import { HttpError } from './http';
 import { newId } from './ids';
+import { cleanInline } from './text';
 import type { EmailKind } from './types';
 
 export interface OutboundEmail {
@@ -34,12 +35,10 @@ export interface EmailProvider {
   sendBatch(messages: ProviderMessage[]): Promise<Array<{ id?: string; error?: string }>>;
 }
 
-/** Parses `Name <address@example.com>` or a bare address. */
 /** Strips CR/LF and control characters so values can't inject email headers. */
-export function cleanHeader(value: string): string {
-  return value.replace(/[\r\n\u0000-\u001f\u007f]+/g, ' ').trim();
-}
+export const cleanHeader = cleanInline;
 
+/** Parses `Name <address@example.com>` or a bare address. */
 export function parseAddress(value: string | undefined | null): { name?: string; email: string } | null {
   if (!value) return null;
   const trimmed = value.trim();

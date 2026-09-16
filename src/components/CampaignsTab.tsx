@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
 import { markdownToText, renderMarkdown } from '../lib/markdown';
+import { personalize, SAMPLE_SUBSCRIBER } from '../lib/personalize';
 import type { Campaign, GroupDetail, SessionUser } from '../lib/types';
 import { api } from './api';
 import { ConfirmDialog, EmptyState, Field, formatDateTime, Modal, type PushToast, Spinner, StatusBadge, useToasts } from './ui';
@@ -173,7 +174,7 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
           <div class="grow">
             <h2 style="margin:0">{editingId ? 'Edit campaign' : 'New campaign'}</h2>
             <p class="muted small" style="margin:0">
-              Markdown supported. Subscribers each get a personal unsubscribe link.
+              {'Markdown supported. Personalize with {{name}}, {{first_name}}, or {{email}}; previews use sample data. Subscribers each get a personal unsubscribe link.'}
             </p>
           </div>
           <button
@@ -189,7 +190,7 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
         </div>
         <div class="editor-grid">
           <div class="card card-body">
-            <Field label="Subject" required>
+            <Field label="Subject" required hint="Merge tokens work here too: {{name}}, {{first_name}}, {{email}}.">
               <input
                 class="input"
                 value={subject}
@@ -198,13 +199,13 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
                 placeholder="What's the email about?"
               />
             </Field>
-            <Field label="Body (Markdown)" hint="**bold**, *italic*, [links](https://…), # headings, lists, > quotes.">
+            <Field label="Body (Markdown)" hint="**bold**, *italic*, [links](https://…), # headings, lists, > quotes. Merge tokens: {{name}}, {{first_name}}, {{email}}.">
               <textarea
                 class="textarea"
                 style="min-height:340px"
                 value={bodyMd}
                 onInput={(event) => setBodyMd((event.target as HTMLTextAreaElement).value)}
-                placeholder={'# Hello!\n\nThis is **my first** campaign.\n\n[Read more](https://example.com)'}
+                placeholder={'Hi {{name}},\n\nThis is **my first** campaign.\n\n[Read more](https://example.com)'}
               />
             </Field>
             <div class="row">
@@ -230,9 +231,9 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
               </button>
             </div>
             {preview === 'preview' ? (
-              <div class="preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(bodyMd) }} />
+              <div class="preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(personalize(bodyMd, SAMPLE_SUBSCRIBER)) }} />
             ) : (
-              <pre class="preview" style="white-space:pre-wrap">{markdownToText(bodyMd)}</pre>
+              <pre class="preview" style="white-space:pre-wrap">{markdownToText(personalize(bodyMd, SAMPLE_SUBSCRIBER))}</pre>
             )}
           </div>
         </div>
@@ -254,7 +255,7 @@ export default function CampaignsTab({ user, group, initial, push }: Props) {
             }
           >
             <form id="test-send-form" onSubmit={sendTest}>
-              <Field label="Send test to" required hint="The latest saved draft is used, including unsaved edits in the editor.">
+              <Field label="Send test to" required hint="The latest saved draft is used, including unsaved edits. Tokens use sample subscriber data.">
                 <input
                   class="input"
                   type="email"
